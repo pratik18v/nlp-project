@@ -8,6 +8,7 @@
 # V is vocabulary size (about 10000).
 # M is dimension of word vector which is embedding size (default is 512).
 # H is dimension of hidden state (default is 1024).
+# A is number of attribute features (4 in our case).
 # =========================================================================================
 
 from __future__ import division
@@ -16,7 +17,7 @@ import tensorflow as tf
 
 
 class CaptionGenerator(object):
-    def __init__(self, word_to_idx, dim_att, dim_feature=[196, 512], dim_embed=512, dim_hidden=1024, n_time_step=16,
+    def __init__(self, word_to_idx, dim_att=[4, 512], dim_feature=[196, 512], dim_embed=512, dim_hidden=1024, n_time_step=16,
                   prev2out=True, ctx2out=True, alpha_c=0.0, selector=True, dropout=True):
         """
         Args:
@@ -40,7 +41,7 @@ class CaptionGenerator(object):
         self.selector = selector
         self.dropout = dropout
         self.V = len(word_to_idx)
-        self.A = dim_att
+        self.A = dim_att[0]
         self.L = dim_feature[0]
         self.D = dim_feature[1]
         self.M = dim_embed
@@ -54,7 +55,8 @@ class CaptionGenerator(object):
         self.emb_initializer = tf.random_uniform_initializer(minval=-1.0, maxval=1.0)
 
         # Place holder for features and captions
-        self.features = tf.placeholder(tf.float32, [None, self.L + self.A, self.D])
+        self.features = tf.placeholder(tf.float32, [None, self.L, self.D])
+        self.att_idxs = tf.placeholder(tf.int32, [None, self.A])
         self.captions = tf.placeholder(tf.int32, [None, self.T + 1])
 
     def _get_initial_lstm(self, features):
@@ -188,21 +190,27 @@ class CaptionGenerator(object):
                                             scope=(name+'batch_norm'))
 
     def build_model(self):
-        features = self.features
+        ann_feats = self.features
         captions = self.captions
-        batch_size = tf.shape(features)[0]
+        batch_size = tf.shape(ann_feats)[0]
 
         captions_in = captions[:, :self.T]
         captions_out = captions[:, 1:]
         mask = tf.to_float(tf.not_equal(captions_out, self._null))
 
+        #Get attribute features
+        att_idxs = self.att_idxs
+        att_feats = self._word_embedding(inputs=att_idxs)
+
 
         # batch normalize feature vectors
-        features = self._batch_norm(features, mode='train', name='conv_features')
-        ann_feats = features[:, :self.L]
-        att_feats = features[:, self.L:]
+        ann_feats = self._batch_norm(ann_feats, mode='train', name='conv_features')
+        att_feats = self._batch_norm(att_feats, mode='train', name='emb_features')
+        features = tf.concat(1, [ann_feats, att_feats], name='combined_features')
+        print 'Joint-features dimension: {}'.format(features.get_shape())
+
         c, h = self._get_initial_lstm(features=features)
-        x = self._word_embedding(inputs=captions_in)
+        x = self._word_embedding(inputs=captions_in, reuse=True)
         ann_features_proj = self._project_features_ann(features=ann_feats)
         att_features_proj = self._project_features_att(features=att_feats)
 
@@ -242,12 +250,15 @@ class CaptionGenerator(object):
         return loss / tf.to_float(batch_size)
 
     def build_sampler(self, max_len=20):
-        features = self.features
+        ann_feats = self.features
+        att_idxs = self.att_idxs
+        att_feats = self._word_embedding(inputs=att_idxs)
 
         # batch normalize feature vectors
-        features = self._batch_norm(features, mode='test', name='conv_features')
-        ann_feats = features[:, :self.L]
-        att_feats = features[:, self.L:]
+        ann_feats = self._batch_norm(ann_feats, mode='test', name='conv_features')
+        att_feats = self._batch_norm(att_feats, mode='test', name='emb_features')
+        features = tf.concat(1, [ann_feats, att_feats], name='combined_features')
+
         c, h = self._get_initial_lstm(features=features)
         ann_features_proj = self._project_features_ann(features=ann_feats)
         att_features_proj = self._project_features_att(features=att_feats)
@@ -260,7 +271,7 @@ class CaptionGenerator(object):
 
         for t in range(max_len):
             if t == 0:
-                x = self._word_embedding(inputs=tf.fill([tf.shape(features)[0]], self._start))
+                x = self._word_embedding(inputs=tf.fill([tf.shape(features)[0]], self._start), reuse=True)
             else:
                 x = self._word_embedding(inputs=sampled_word, reuse=True)
 

@@ -17,6 +17,9 @@ def load_coco_data(data_path='./data', split='train'):
         data['captions'] = pickle.load(f)
     with open(os.path.join(data_path, '%s.image.idxs.pkl' %split), 'rb') as f:
         data['image_idxs'] = pickle.load(f)
+    with open(os.path.join(data_path, '%s.att.info.pkl' %split), 'rb') as f:
+        data['att_idxs'] = np.asarray(pickle.load(f), dtype=np.int32)
+
 
     if split == 'train':
         with open(os.path.join(data_path, 'word_to_idx.pkl'), 'rb') as f:
@@ -60,8 +63,8 @@ def sample_coco_minibatch(data, batch_size):
     mask = np.arange(0,batch_size)
     features = data['features'][mask]
     file_names = data['file_names'][mask]
-    #image_idxs = data['image_idxs'][mask]
-    return features, file_names #, image_idxs
+    att_idxs = data['att_idxs'][mask]
+    return features, file_names, att_idxs
 
 def write_bleu(scores, path, epoch):
     if epoch == 0:
