@@ -14,7 +14,9 @@ def main():
                                        dim_hidden=1024, n_time_step=16, prev2out=True,
                                                  ctx2out=True, alpha_c=1.0, selector=True, dropout=True)
 
-    solver = CaptioningSolver(model, data, val_data, n_epochs=15, batch_size=64, update_rule='adam',
+    idx_to_word = {v: k for k, v in word_to_idx.iteritems()}
+
+    solver = CaptioningSolver(model, data, val_data, idx_to_word, n_epochs=15, batch_size=64, update_rule='adam',
                                           learning_rate=0.001, print_every=50, save_every=5, image_path='./image/',
                                     pretrained_model=None, model_path='model/lstm2/', test_model='model/lstm2/model-15',
                                      print_bleu=True, log_path='log/')

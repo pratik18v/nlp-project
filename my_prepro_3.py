@@ -78,8 +78,8 @@ def process_caption_data(captions, max_length=15):#caption_data, max_length=15
         #print '###############################################'
         caption = caption.replace('.','').replace(',','').replace("'","").replace('"','')
         caption = caption.replace('&','and').replace('(','').replace(")","").replace('-',' ')
-        #caption = " ".join(caption.split())  # replace multiple spaces
-        caption = " ".join(nltk.word_tokenize(caption))  # replace multiple spaces
+        caption = " ".join(caption.split())  # replace multiple spaces
+        #caption = " ".join(nltk.word_tokenize(caption))  # replace multiple spaces
         #caption_data.set_value(i, 'caption', caption.lower())
         captions[i] = caption
 
@@ -139,8 +139,8 @@ def get_caption_data(fp, max_length=15):
             temp_caption = ''
             for c in caption:
                 #print c
-                #if len(c.split()) > min_length and len(c.split()) <= max_length:
-                if len(nltk.word_tokenize(c)) > min_length and len(nltk.word_tokenize(c)) <= max_length:
+                if len(c.split()) > min_length and len(c.split()) <= max_length:
+                #if len(nltk.word_tokenize(c)) > min_length and len(nltk.word_tokenize(c)) <= max_length:
                     flag = True
                     image_ids.append(idx_in_name[idx_in_csv.index(idx)])
                     f_name = fp +'%s.jpg'%(idx_in_name[idx_in_csv.index(idx)])
@@ -160,18 +160,20 @@ def get_caption_data(fp, max_length=15):
 
 #############################################################################################################
 
-def _build_vocab(annotations, threshold=5):
+def _build_vocab(annotations, threshold=3):
     counter = Counter()
     max_len = 0
     for i, caption in enumerate(annotations['caption']):
-        #words = caption.split(' ') # caption contrains only lower-case words
-        words = nltk.word_tokenize(caption)
+        words = caption.split(' ') # caption contrains only lower-case words
+        #words = nltk.word_tokenize(caption)
         for w in words:
-            if hasNumbers(w) == False:
-                counter[w.lower()] +=1
+            counter[w] +=1
 
-        if len(nltk.word_tokenize(caption)) > max_len:
-            max_len = len(nltk.word_tokenize(caption))
+        if len(caption.split(' ')) > max_len:
+            max_len = len(caption.split(' '))
+
+        #if len(nltk.word_tokenize(caption)) > max_len:
+        #    max_len = len(nltk.word_tokenize(caption))
 
     vocab = [word for word in counter if counter[word] >= threshold]
 #    print ('Filtered %d words to %d words with word count threshold %d.' % (len(counter), len(vocab), threshold))
@@ -190,8 +192,8 @@ def _build_caption_vector(annotations, word_to_idx, max_length=15):
     captions = np.ndarray((n_examples,max_length+2)).astype(np.int32)
 
     for i, caption in enumerate(annotations['caption']):
-        #words = caption.split(" ") # caption contrains only lower-case words
-        words = nltk.word_tokenize(caption)
+        words = caption.split(" ") # caption contrains only lower-case words
+        #words = nltk.word_tokenize(caption)
         cap_vec = []
         cap_vec.append(word_to_idx['<START>'])
         for word in words:

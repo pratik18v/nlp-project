@@ -11,7 +11,7 @@ from bleu import evaluate
 
 
 class CaptioningSolver(object):
-    def __init__(self, model, data, val_data, idx_to_word, **kwargs):
+    def __init__(self, model, data, val_data, **kwargs):
         """
         Required Arguments:
             - model: Show Attend and Tell caption generating model
@@ -37,7 +37,6 @@ class CaptioningSolver(object):
         self.model = model
         self.data = data
         self.val_data = val_data
-        self.idx_to_word = idx_to_word
         self.n_epochs = kwargs.pop('n_epochs', 10)
         self.batch_size = kwargs.pop('batch_size', 100)
         self.update_rule = kwargs.pop('update_rule', 'adam')
@@ -81,7 +80,7 @@ class CaptioningSolver(object):
         # build graphs for training model and sampling captions
         loss = self.model.build_model()
         tf.get_variable_scope().reuse_variables()
-        _, _, generated_captions = self.model.build_sampler(max_len=20)
+        _, _, _, generated_captions = self.model.build_sampler(max_len=20)
 
         # train op
         with tf.name_scope('optimizer'):
@@ -143,6 +142,7 @@ class CaptioningSolver(object):
                     #Extract features
                     image_batch = np.array(map(lambda x: ndimage.imread(x, mode='RGB'), file_names_batch)).astype(np.float32)
                     features_batch = sess.run(self.model.vgg_features, feed_dict={self.model.images: image_batch})
+                    #print 'Train features dim: {}'.format(features_batch.get_shape())
 
                     att_idxs_batch = att_idxs[image_idxs_batch].astype(np.int32)
                     feed_dict = {self.model.features: features_batch, self.model.att_idxs: att_idxs_batch, self.model.captions: captions_batch}
@@ -180,6 +180,7 @@ class CaptioningSolver(object):
                         #Extract features
                         image_batch = np.array(map(lambda x: ndimage.imread(x, mode='RGB'), file_names_batch)).astype(np.float32)
                         features_batch = sess.run(self.model.vgg_features, feed_dict={self.model.images: image_batch})
+                        #print 'Val features dim: {}'.format(features_batch.get_shape())
 
                         att_idxs_batch = val_att_idxs[i*self.batch_size:(i+1)*self.batch_size]
                         feed_dict = {self.model.features: features_batch, self.model.att_idxs: att_idxs_batch}
@@ -213,12 +214,10 @@ class CaptioningSolver(object):
 
         #features = data['features']
         file_names = data['file_names']
-        image_ids = data['image_idxs']
-        captions = data['captions']
         att_idxs = data['att_idxs']
 
         # build a graph to sample captions
-        alphas, betas, sampled_captions = self.model.build_sampler(max_len=20)    # (N, max_len, L), (N, max_len)
+        alphas_ann, alphas_att, betas, sampled_captions = self.model.build_sampler(max_len=20)    # (N, max_len, L), (N, max_len)
 
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
@@ -231,20 +230,12 @@ class CaptioningSolver(object):
             features_batch = sess.run(self.model.vgg_features, feed_dict={self.model.images: image_batch})
 
             feed_dict = { self.model.features: features_batch, self.model.att_idxs: att_idxs_batch }
-            alps, bts, sam_cap = sess.run([alphas, betas, sampled_captions], feed_dict)  # (N, max_len, L), (N, max_len)
+            alps_ann, alps_att, bts, sam_cap = sess.run([alphas_ann, alphas_att, betas, sampled_captions], feed_dict)  # (N, max_len, L), (N, max_len)
             decoded = decode_captions(sam_cap, self.model.idx_to_word)
 
             if attention_visualization:
                 for n in range(10):
-                    print "Sampled Caption: %s\n" %decoded[n]
-                    ground_truths = captions[np.where(image_ids == file_names.tolist().index(image_files[n]))]
-                    print 'Ground truths: '
-                    for gt in ground_truths:
-                        for w_idx in gt:
-                            if self.idx_to_word[w_idx] == '<NULL>':
-                                break
-                            print self.idx_to_word[w_idx],
-                        print '\n'
+                    print "Sampled Caption: %s" %decoded[n]
 
                     # Plot original image
                     img = ndimage.imread(image_files[n])
@@ -258,9 +249,9 @@ class CaptioningSolver(object):
                         if t > 18:
                             break
                         plt.subplot(4, 5, t+2)
-                        plt.text(0, 1, '%s(%.2f)\n %s(%.4f)\n %s(%.4f)\n %s(%.4f)\n %s(%.4f)'%(words[t], bts[n,t], self.idx_to_word[att_idxs_batch[n][0]], alps[n,t, 196], self.idx_to_word[att_idxs_batch[n][1]], alps[n, t, 197], self.idx_to_word[att_idxs_batch[n][2]], alps[n, t, 198], self.idx_to_word[att_idxs_batch[n][3]], alps[n, t, 199]) , color='black', backgroundcolor='white', fontsize=8)
+                        plt.text(0, 1, '%s(%.2f)'%(words[t], bts[n,t]) , color='black', backgroundcolor='white', fontsize=8)
                         plt.imshow(img)
-                        alp_curr = alps[n,t,:196].reshape(14,14)
+                        alp_curr = alps_ann[n,t,:].reshape(14,14)
                         alp_img = skimage.transform.pyramid_expand(alp_curr, upscale=16, sigma=20)
                         plt.imshow(alp_img, alpha=0.85)
                         plt.axis('off')

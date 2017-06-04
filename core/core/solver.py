@@ -213,8 +213,6 @@ class CaptioningSolver(object):
 
         #features = data['features']
         file_names = data['file_names']
-        image_ids = data['image_idxs']
-        captions = data['captions']
         att_idxs = data['att_idxs']
 
         # build a graph to sample captions
@@ -236,15 +234,7 @@ class CaptioningSolver(object):
 
             if attention_visualization:
                 for n in range(10):
-                    print "Sampled Caption: %s\n" %decoded[n]
-                    ground_truths = captions[np.where(image_ids == file_names.tolist().index(image_files[n]))]
-                    print 'Ground truths: '
-                    for gt in ground_truths:
-                        for w_idx in gt:
-                            if self.idx_to_word[w_idx] == '<NULL>':
-                                break
-                            print self.idx_to_word[w_idx],
-                        print '\n'
+                    print "Sampled Caption: %s" %decoded[n]
 
                     # Plot original image
                     img = ndimage.imread(image_files[n])

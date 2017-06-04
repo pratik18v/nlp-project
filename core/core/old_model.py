@@ -8,6 +8,7 @@
 # V is vocabulary size (about 10000).
 # M is dimension of word vector which is embedding size (default is 512).
 # H is dimension of hidden state (default is 1024).
+# A is number of attribute features (4 in our case).
 # =========================================================================================
 
 from __future__ import division
@@ -23,7 +24,7 @@ vgg_layers = ['conv1_1', 'relu1_1', 'conv1_2', 'relu1_2', 'pool1',
 
 
 class CaptionGenerator(object):
-    def __init__(self, word_to_idx, vgg_path = './data/imagenet-vgg-verydeep-19.mat', dim_att=[4, 512],dim_feature=[196, 512], dim_embed=512, dim_hidden=1024, n_time_step=16, prev2out=True, ctx2out=True, alpha_c=0.0, selector=True, dropout=True):
+    def __init__(self, word_to_idx, vgg_path = './data/imagenet-vgg-verydeep-19.mat', dim_att=[4, 512], dim_feature=[196, 512], dim_embed=512, dim_hidden=1024, n_time_step=16, prev2out=True, ctx2out=True, alpha_c=0.0, selector=True, dropout=True):
         """
         Args:
             word_to_idx: word-to-index mapping dictionary.
@@ -37,7 +38,6 @@ class CaptionGenerator(object):
             selector: (optional) gating scalar for context vector. (see Section (4.2.1) for explanation)
             dropout: (optional) If true then dropout layer is added.
         """
-
         self.vgg_path = vgg_path
         self.word_to_idx = word_to_idx
         self.idx_to_word = {i: w for w, i in word_to_idx.iteritems()}
@@ -46,8 +46,8 @@ class CaptionGenerator(object):
         self.alpha_c = alpha_c
         self.selector = selector
         self.dropout = dropout
-        self.A = dim_att[0]
         self.V = len(word_to_idx)
+        self.A = dim_att[0]
         self.L = dim_feature[0]
         self.D = dim_feature[1]
         self.M = dim_embed
@@ -64,6 +64,7 @@ class CaptionGenerator(object):
         self.features = tf.placeholder(tf.float32, [None, self.L, self.D])
         self.att_idxs = tf.placeholder(tf.int32, [None, self.A])
         self.captions = tf.placeholder(tf.int32, [None, self.T + 1])
+
 
     ############################### Functions to build VGG network ############################################
 
@@ -111,7 +112,6 @@ class CaptionGenerator(object):
 
     ##########################################################################################################
 
-
     def _get_initial_lstm(self, features):
         with tf.variable_scope('initial_lstm'):
             features_mean = tf.reduce_mean(features, 1)
@@ -131,30 +131,75 @@ class CaptionGenerator(object):
             x = tf.nn.embedding_lookup(w, inputs, name='word_vector')  # (N, T, M) or (N, M)
             return x
 
-    def _project_features(self, features):
-        with tf.variable_scope('project_features'):
+    def _project_features_ann(self, features):
+        with tf.variable_scope('project_features_ann'):
             w = tf.get_variable('w', [self.D, self.D], initializer=self.weight_initializer)
             features_flat = tf.reshape(features, [-1, self.D])
             features_proj = tf.matmul(features_flat, w)
-            features_proj = tf.reshape(features_proj, [-1, self.L + self.A, self.D])
+            features_proj = tf.reshape(features_proj, [-1, self.L, self.D])
+            #print '-----------------------------------------------------------'
+            #print 'Dimension ann_features_proj: {}'.format(features_proj.get_shape())
+            #print '-----------------------------------------------------------'
             return features_proj
 
-    def _attention_layer(self, features, features_proj, h, reuse=False):
-        with tf.variable_scope('attention_layer', reuse=reuse):
+    def _attention_layer_ann(self, features, features_proj, h, reuse=False):
+        with tf.variable_scope('attention_layer_ann', reuse=reuse):
             w = tf.get_variable('w', [self.H, self.D], initializer=self.weight_initializer)
             b = tf.get_variable('b', [self.D], initializer=self.const_initializer)
             w_att = tf.get_variable('w_att', [self.D, 1], initializer=self.weight_initializer)
 
             h_att = tf.nn.relu(features_proj + tf.expand_dims(tf.matmul(h, w), 1) + b)    # (N, L, D)
-            out_att = tf.reshape(tf.matmul(tf.reshape(h_att, [-1, self.D]), w_att), [-1, self.L + self.A])   # (N, L)
+            out_att = tf.reshape(tf.matmul(tf.reshape(h_att, [-1, self.D]), w_att), [-1, self.L])   # (N, L)
             alpha = tf.nn.softmax(out_att)
-            #print '--------------------------------------------------------------------------------------------'
-            #print 'Dim of features: {}'.format(features.get_shape())
-            #print 'Dim of projected features: {}'.format(features_proj.get_shape())
-            #print 'Dim of alpha: {}'.format(alpha.get_shape())
-            #print '--------------------------------------------------------------------------------------------'
             context = tf.reduce_sum(features * tf.expand_dims(alpha, 2), 1, name='context')   #(N, D)
+            #print '-----------------------------------------------------------'
+            #print 'Dimension context: {}'.format(context.get_shape())
+            #print 'Dimension alpha: {}'.format(alpha.get_shape())
+            #print '-----------------------------------------------------------'
             return context, alpha
+
+    def _project_features_att(self, features):
+        with tf.variable_scope('project_features_att'):
+            w = tf.get_variable('w', [self.D, self.D], initializer=self.weight_initializer)
+            features_flat = tf.reshape(features, [-1, self.D])
+            features_proj = tf.matmul(features_flat, w)
+            features_proj = tf.reshape(features_proj, [-1, self.A, self.D])
+            #print '-----------------------------------------------------------'
+            #print 'Dimension att_features_proj: {}'.format(features_proj.get_shape())
+            #print '-----------------------------------------------------------'
+            return features_proj
+
+    def _attention_layer_att(self, features, features_proj, h, reuse=False):
+        with tf.variable_scope('attention_layer_att', reuse=reuse):
+            w = tf.get_variable('w', [self.H, self.D], initializer=self.weight_initializer)
+            b = tf.get_variable('b', [self.D], initializer=self.const_initializer)
+            w_att = tf.get_variable('w_att', [self.D, 1], initializer=self.weight_initializer)
+
+            h_att = tf.nn.relu(features_proj + tf.expand_dims(tf.matmul(h, w), 1) + b)    # (N, A, D)
+            out_att = tf.reshape(tf.matmul(tf.reshape(h_att, [-1, self.D]), w_att), [-1, self.A])   # (N, A)
+            alpha = tf.nn.softmax(out_att)
+            temp = tf.expand_dims(alpha,2)
+            context = tf.reduce_sum(features * tf.expand_dims(alpha, 2), 1, name='context')   #(N, D)
+            #print '-----------------------------------------------------------'
+            #print 'Dimension context: {}'.format(context.get_shape())
+            #print 'Dimension alpha: {}'.format(alpha.get_shape())
+            #print '-----------------------------------------------------------'
+            return context, alpha
+
+    def _build_context(self, context1, context2, h, reuse=False):
+        with tf.variable_scope('build_context', reuse=reuse):
+            w_ann = tf.get_variable('w_ann', [self.H, 1], initializer=self.weight_initializer)
+            b_ann = tf.get_variable('b_ann', [1], initializer=self.const_initializer)
+            w_att = tf.get_variable('w_att', [self.H, 1], initializer=self.weight_initializer)
+            b_att = tf.get_variable('b_att', [1], initializer=self.const_initializer)
+
+            gamma1 = tf.nn.sigmoid(context1 + tf.matmul(h, w_ann) + b_ann, 'gamma1')
+            gamma2 = tf.nn.sigmoid(context2 + tf.matmul(h, w_att) + b_att, 'gamma2')
+
+            context = tf.add(tf.mul(gamma1, context1, name='selected_context_1'), \
+                             tf.mul(gamma2, context2, name='selected_context_2'))
+
+        return context
 
     def _selector(self, context, h, reuse=False):
         with tf.variable_scope('selector', reuse=reuse):
@@ -217,20 +262,27 @@ class CaptionGenerator(object):
         att_feats = self._word_embedding(inputs=att_idxs)
 
         # batch normalize feature vectors
+        ann_feats = self._batch_norm(ann_feats, mode='train', name='conv_features')
+        att_feats = self._batch_norm(att_feats, mode='train', name='emb_features')
         features = tf.concat(1, [ann_feats, att_feats], name='combined_features')
-        features = self._batch_norm(features, mode='train', name='conv_features')
+        #print 'Joint-features dimension: {}'.format(features.get_shape())
 
         c, h = self._get_initial_lstm(features=features)
         x = self._word_embedding(inputs=captions_in, reuse=True)
-        features_proj = self._project_features(features=features)
+        ann_features_proj = self._project_features_ann(features=ann_feats)
+        att_features_proj = self._project_features_att(features=att_feats)
 
         loss = 0.0
-        alpha_list = []
+        alpha_list_ann = []
+        alpha_list_att = []
         lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.H)
 
         for t in range(self.T):
-            context, alpha = self._attention_layer(features, features_proj, h, reuse=(t!=0))
-            alpha_list.append(alpha)
+            context1, alpha1 = self._attention_layer_ann(ann_feats, ann_features_proj, h, reuse=(t!=0))
+            context2, alpha2 = self._attention_layer_att(att_feats, att_features_proj, h, reuse=(t!=0))
+            context = self._build_context(context1, context2, h, reuse=(t!=0))
+            alpha_list_ann.append(alpha1)
+            alpha_list_att.append(alpha2)
 
             if self.selector:
                 context, beta = self._selector(context, h, reuse=(t!=0))
@@ -242,10 +294,16 @@ class CaptionGenerator(object):
             loss += tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(logits, captions_out[:, t]) * mask[:, t])
 
         if self.alpha_c > 0:
-            alphas = tf.transpose(tf.pack(alpha_list), (1, 0, 2))     # (N, T, L)
-            alphas_all = tf.reduce_sum(alphas, 1)      # (N, L)
-            alpha_reg = self.alpha_c * tf.reduce_sum((16./196 - alphas_all) ** 2)
-            loss += alpha_reg
+            alphas_ann = tf.transpose(tf.pack(alpha_list_ann), (1, 0, 2))     # (N, T, L)
+            alphas_all_ann = tf.reduce_sum(alphas_ann, 1)      # (N, L)
+            alpha_reg_ann = self.alpha_c * tf.reduce_sum((16./self.L - alphas_all_ann) ** 2)
+
+            alphas_att = tf.transpose(tf.pack(alpha_list_att), (1, 0, 2))     # (N, T, A)
+            alphas_all_att = tf.reduce_sum(alphas_att, 1)      # (N, A)
+            alpha_reg_att = self.alpha_c * tf.reduce_sum((16./self.A - alphas_all_att) ** 2)
+
+            loss += alpha_reg_ann
+            loss += alpha_reg_att
 
         return loss / tf.to_float(batch_size)
 
@@ -261,14 +319,17 @@ class CaptionGenerator(object):
         att_feats = self._word_embedding(inputs=att_idxs)
 
         # batch normalize feature vectors
+        ann_feats = self._batch_norm(ann_feats, mode='test', name='conv_features')
+        att_feats = self._batch_norm(att_feats, mode='test', name='emb_features')
         features = tf.concat(1, [ann_feats, att_feats], name='combined_features')
-        features = self._batch_norm(features, mode='test', name='conv_features')
 
         c, h = self._get_initial_lstm(features=features)
-        features_proj = self._project_features(features=features)
+        ann_features_proj = self._project_features_ann(features=ann_feats)
+        att_features_proj = self._project_features_att(features=att_feats)
 
         sampled_word_list = []
-        alpha_list = []
+        alpha_list_ann = []
+        alpha_list_att = []
         beta_list = []
         lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.H)
 
@@ -278,8 +339,11 @@ class CaptionGenerator(object):
             else:
                 x = self._word_embedding(inputs=sampled_word, reuse=True)
 
-            context, alpha = self._attention_layer(features, features_proj, h, reuse=(t!=0))
-            alpha_list.append(alpha)
+            context1, alpha1 = self._attention_layer_ann(ann_feats, ann_features_proj, h, reuse=(t!=0))
+            context2, alpha2 = self._attention_layer_att(att_feats, att_features_proj, h, reuse=(t!=0))
+            context = self._build_context(context1, context2, h, reuse=(t!=0))
+            alpha_list_ann.append(alpha1)
+            alpha_list_att.append(alpha2)
 
             if self.selector:
                 context, beta = self._selector(context, h, reuse=(t!=0))
@@ -292,7 +356,11 @@ class CaptionGenerator(object):
             sampled_word = tf.argmax(logits, 1)
             sampled_word_list.append(sampled_word)
 
-        alphas = tf.transpose(tf.pack(alpha_list), (1, 0, 2))     # (N, T, L)
+        alphas_ann = tf.transpose(tf.pack(alpha_list_ann), (1, 0, 2))     # (N, T, L)
+        alphas_att = tf.transpose(tf.pack(alpha_list_att), (1, 0, 2))     # (N, T, A)
         betas = tf.transpose(tf.squeeze(beta_list), (1, 0))    # (N, T)
         sampled_captions = tf.transpose(tf.pack(sampled_word_list), (1, 0))     # (N, max_len)
-        return alphas, betas, sampled_captions
+        #print alphas_ann.get_shape(), alphas_att.get_shape()
+        return alphas_ann, alphas_att, betas, sampled_captions
+
+
